@@ -1,0 +1,207 @@
+二、spark运行环境
+Java环境（JVM）+集群环境（Yarn）+spark环境（lib）
+
+1、启动Local模式
+local本地模式毕竟只是用来进行练习演示的，真实工作中还是要将应用提交到对应的集群中去执行
+bin/spark-shell
+提交应用
+bin/spark-submit \
+--class spark_wordcount.Spark03_WordCount_Env \
+--master local[2] \
+./jars/spark_test-1.0-SNAPSHOT.jar
+
+1)--class表示要执行程序的主类，此处可以更换为咱们自己写的应用程序
+2)--master local[2] 部署模式，默认为本地模式，数字表示分配的虚拟CPU核数量
+3)spark-examples_2.12-3.0.0.jar 运行的应用类所在的jar包，实际使用时，可以设定为咱们自己打的jar包
+4)数字10表示程序的入口参数，用于设定当前应用的任务数量
+
+
+2、Standalone模式
+只使用Spark自身节点运行的集群模式，也就是独立部署（Standalone）模式。Spark的Standalone模式体现了经典的master-slave模式。
+
+修改配置文件
+1)进入解压缩后路径的conf目录，修改slaves.template文件名为slaves
+mv slaves.template slaves
+
+2)修改slaves文件，添加worker节点
+hadoop102
+hadoop103
+hadoop104
+
+3)修改spark-env.sh.template文件名为spark-env.sh
+mv spark-env.sh.template spark-env.sh
+
+4)修改spark-env.sh文件，添加JAVA_HOME环境变量和集群对应的master节点
+export JAVA_HOME=/opt/module/jdk1.8.0_144
+SPARK_MASTER_HOST=linux1
+SPARK_MASTER_PORT=7077
+注意：7077端口，相当于hadoop3内部通信的8020端口，此处的端口需要确认自己的Hadoop配置
+
+5)分发spark-standalone目录
+xsync spark-standalone
+
+启动集群
+1)执行脚本命令：
+sbin/start-all.sh 
+
+集群模式下的：提交应用
+bin/spark-submit \
+--class org.apache.spark.examples.SparkPi \
+--master spark://hadoop102:7077 \
+./examples/jars/spark-examples_2.12-3.0.0.jar \
+10
+
+1)--class表示要执行程序的主类
+2)--master spark://linux1:7077 独立部署模式，连接到Spark集群
+3)spark-examples_2.12-3.0.0.jar 运行类所在的jar包
+4)数字10表示程序的入口参数，用于设定当前应用的任务数量
+
+参数	解释
+--class	Spark程序中包含主函数的类
+--master	Spark程序运行的模式(环境)	模式：local[*]、spark://linux1:7077、Yarn
+--executor-memory 1G	指定每个executor可用内存为1G
+--total-executor-cores 2	指定所有executor使用的cpu核数为2个
+--executor-cores	指定每个executor使用的cpu核数
+application-jar	打包好的应用jar，包含依赖。这个URL在集群中全局可见。 比如hdfs:// 共享存储系统，如果是file:// path，那么所有的节点的path都包含同样的jar
+
+配置历史服务
+1)修改spark-defaults.conf.template文件名为spark-defaults.conf
+mv spark-defaults.conf.template spark-defaults.conf
+
+2)修改spark-default.conf文件，配置日志存储路径
+spark.eventLog.enabled          true
+spark.eventLog.dir               hdfs://linux1:8020/directory
+
+注意：需要启动hadoop集群，HDFS上的directory目录需要提前存在。
+sbin/start-dfs.sh
+hadoop fs -mkdir /directory
+
+3)修改spark-env.sh文件, 添加日志配置
+export SPARK_HISTORY_OPTS="
+-Dspark.history.ui.port=18080 
+-Dspark.history.fs.logDirectory=hdfs://linux1:8020/directory 
+-Dspark.history.retainedApplications=30"
+参数1含义：WEB UI访问的端口号为18080
+参数2含义：指定历史服务器日志存储路径
+参数3含义：指定保存Application历史记录的个数，如果超过这个值，旧的应用程序信息将被删除，这个是内存中的应用数，而不是页面上显示的应用数。
+
+4)分发配置文件
+xsync conf 
+
+5)重新启动集群和历史服务
+sbin/start-all.sh
+sbin/start-history-server.sh
+
+配置高可用（HA）
+所谓的高可用是因为当前集群中的Master节点只有一个，所以会存在单点故障问题。所以为了解决单点故障问题，需要在集群中配置多个Master节点，一旦处于活动状态的Master发生故障时，由备用Master提供服务，保证作业可以继续执行。这里的高可用一般采用Zookeeper设置
+
+1)停止集群
+sbin/stop-all.sh 
+2)启动Zookeeper
+xstart zk 
+3)修改spark-env.sh文件添加如下配置
+
+注释如下内容：
+#SPARK_MASTER_HOST=linux1
+#SPARK_MASTER_PORT=7077
+
+添加如下内容:
+#Master监控页面默认访问端口为8080，但是可能会和Zookeeper冲突，所以改成8989，也可以自定义，访问UI监控页面时请注意
+
+SPARK_MASTER_WEBUI_PORT=8989
+export SPARK_DAEMON_JAVA_OPTS="
+-Dspark.deploy.recoveryMode=ZOOKEEPER 
+-Dspark.deploy.zookeeper.url=linux1,linux2,linux3 
+-Dspark.deploy.zookeeper.dir=/spark"
+
+4)分发配置文件
+xsync conf/ 
+
+5)启动集群
+sbin/start-all.sh 
+
+6)启动hadoop103的单独Master节点，此时hadoop103节点Master状态处于备用状态
+sbin/start-master.sh 
+
+提交应用到高可用集群
+bin/spark-submit \
+--class org.apache.spark.examples.SparkPi \
+--master spark://hadoop102:7077,hadoop103:7077 \
+./examples/jars/spark-examples_2.12-3.0.0.jar \
+10
+
+3、Yarn模式
+独立部署（Standalone）模式由Spark自身提供计算资源，无需其他框架提供资源。这种方式降低了和其他第三方资源框架的耦合性，独立性非常强。但是你也要记住，Spark主要是计算框架，而不是资源调度框架，所以本身提供的资源调度并不是它的强项，所以还是和其他专业的资源调度框架集成会更靠谱一些。所以接下来我们来学习在强大的Yarn环境下Spark是如何工作的（其实是因为在国内工作中，Yarn使用的非常多）
+
+
+修改配置文件
+1)修改hadoop配置文件/opt/module/hadoop/etc/hadoop/yarn-site.xml, 并分发
+<!--是否启动一个线程检查每个任务正使用的物理内存量，如果任务超出分配值，则直接将其杀掉，默认是true -->
+<property>
+     <name>yarn.nodemanager.pmem-check-enabled</name>
+     <value>false</value>
+</property>
+
+<!--是否启动一个线程检查每个任务正使用的虚拟内存量，如果任务超出分配值，则直接将其杀掉，默认是true -->
+<property>
+     <name>yarn.nodemanager.vmem-check-enabled</name>
+     <value>false</value>
+</property>
+2)修改conf/spark-env.sh
+mv spark-env.sh.template spark-env.sh
+
+添加JAVA_HOME和YARN_CONF_DIR配置
+export JAVA_HOME=/opt/module/jdk1.8.0_144
+YARN_CONF_DIR=/opt/module/hadoop/etc/hadoop
+
+启动Hadoop以及Yarn集群提交任务
+bin/spark-submit \
+--class org.apache.spark.examples.SparkPi \
+--master yarn \
+--deploy-mode cluster \
+./examples/jars/spark-examples_2.12-3.0.0.jar \
+10
+
+配置历史服务器
+1)修改spark-defaults.conf.template文件名为spark-defaults.conf
+mv spark-defaults.conf.template spark-defaults.conf
+
+2)修改spark-default.conf文件，配置日志存储路径
+spark.eventLog.enabled          true
+spark.eventLog.dir               hdfs://hadoop103:8020/directory
+注意：需要启动hadoop集群，HDFS上的目录需要提前存在。
+ sbin/start-dfs.sh
+ hadoop fs -mkdir /directory
+
+3)修改spark-env.sh文件, 添加日志配置
+export SPARK_HISTORY_OPTS="
+-Dspark.history.ui.port=18080 
+-Dspark.history.fs.logDirectory=hdfs://hadoop102:8020/directory 
+-Dspark.history.retainedApplications=30"
+
+4)修改spark-defaults.conf
+spark.yarn.historyServer.address=linux1:18080
+spark.history.ui.port=18080
+
+5)启动历史服务
+sbin/start-history-server.sh 
+
+6)重新提交应用
+bin/spark-submit \
+--class org.apache.spark.examples.SparkPi \
+--master yarn \
+--deploy-mode client \
+./examples/jars/spark-examples_2.12-3.0.0.jar \
+10
+
+部署模式对比
+Local	1	无	Spark	测试
+Standalone	3	Master及Worker	Spark	单独部署
+Yarn	1	Yarn及HDFS	Hadoop	混合部署
+
+端口号
+Spark查看当前Spark-shell运行任务情况端口号：4040（计算）
+Spark Master内部通信服务端口号：7077
+Standalone模式下，Spark Master Web端口号：8080（资源）
+Spark历史服务器端口号：18080
+Hadoop YARN任务运行情况查看端口号：8088

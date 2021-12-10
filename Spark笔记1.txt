@@ -1,0 +1,43 @@
+一、Spark概述
+Hadoop 0.x 1.x 
+1.NameNode是单点的，容易出现单点故障，制约了集群的发展
+2.NameNode是单点的，受到了硬件的制约，制约了集群的发展
+3.MR太慢，主要是因为设计理念的问题
+MR就是用于单一数据计算，在当前的数据挖掘和数据迭代计算中不适用
+MR框架主要应用于数据的一次性计算，从存储介质中读取数据，然后进行处理后，再存储回介质中
+
+4.MR框架和Hadoop耦合性非常强，无法分离
+
+Hadoop 2.x Yarn
+1.NameNode 是高可用的
+2.将资源调度和计算进行了解耦合
+3.可以替换计算框架
+
+Hadoop 3.x 
+
+Spark
+1.Spark基于MR框架的，但是优化了其中的计算过程，使用内存来代替计算结果的传输
+2.Spark基于Scala语言开发的，更适合迭代计算和数据挖掘计算
+3.Spark中计算模型非常丰富
+MR框架中的计算模型：Mapper,Reducer
+Scala计算模型：map,filter,groupBy,sortBy
+
+
+Spark(计算)  On  Yarn(资源)
+
+Spark是一种基于内存的快速，通用，可扩展的大数据分析计算框架
+Spark没有存储功能
+Spark就是在传统的MapReduce 计算框架的基础上，利用其计算过程的优化，从而大大加快了数据分析、挖掘的运行和读写速度，并将计算单元缩小到更适合并行计算和重复使用的RDD计算模型。
+
+Spark和Hadoop的根本差异是多个作业之间的数据通信问题 : Spark多个作业之间数据通信是基于内存，而Hadoop是基于磁盘。
+
+    Spark Core
+Spark Core中提供了Spark最基础与最核心的功能，Spark其他的功能如：Spark SQL，Spark Streaming，GraphX, MLlib都是在Spark Core的基础上进行扩展的
+Spark SQL
+Spark SQL是Spark用来操作结构化数据的组件。通过Spark SQL，用户可以使用SQL或者Apache Hive版本的SQL方言（HQL）来查询数据。
+Spark Streaming
+Spark Streaming是Spark平台上针对实时数据进行流式计算的组件，提供了丰富的处理数据流的API。
+Spark MLlib
+MLlib是Spark提供的一个机器学习算法库。MLlib不仅提供了模型评估、数据导入等额外的功能，还提供了一些更底层的机器学习原语。
+Spark GraphX
+GraphX是Spark面向图计算提供的框架与算法库。
