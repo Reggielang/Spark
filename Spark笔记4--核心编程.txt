@@ -34,6 +34,10 @@ IO：输入，输出（字节流，字符流）
  *  - Optionally, a list of preferred locations to compute each split on (e.g. block locations for
  *    an HDFS file)
 
+
+RDD分区：
+RDD为了能够快速并行计算，防止一个Executor过载，在RDD中创建了一个类似管道的东西，将数据进行了分区
+
 数据和计算的位置在同一个进程上称为进程本地化
 数据和计算的位置在同一个节点上称为节点本地化
 数据和计算的位置在同一个机架上称为机架本地化
@@ -93,9 +97,98 @@ RDD转换算子（将RDD的方法称为算子的原因：为了和Scala集合的
 5)def glom(): RDD[Array[T]]
 将同一个分区的数据直接转换为相同类型的内存数组进行处理，分区不变
 
+！注意：shuffle表示一个分区的数据被打乱后和其他分区的数据重新组合在一起！
 6)def groupBy[K](f: T => K)(implicit kt: ClassTag[K]): RDD[(K, Iterable[T])]
-将数据根据指定的规则进行分组, 分区默认不变，但是数据会被打乱重新组合，我们将这样的操作称之为shuffle。极限情况下，数据可能被分在同一个分区中
+将数据根据指定的规则进行分组, 分区默认不变，但是数据会被打乱重新组合，极限情况下，数据可能被分在同一个分区中
 spark要求一个组的数据在一个分区中，但是并不是说一个分区中只有一个组
 shuffle操作不允许在内存中等待，必须落盘（shuffle会将完整的计算过程一分为二，形成两个阶段，一阶段用于写数据，二阶段用于读数据，写数据阶段如果没有完成，读数据阶段不能执行）
 shuffle操作可以更改分区
 
+7)filterdef filter(f: T => Boolean): RDD[T]
+将数据根据指定的规则进行筛选过滤，符合规则的数据保留，不符合规则的数据丢弃。
+当数据进行筛选过滤后，分区不变，但是分区内的数据可能不均衡，生产环境下，可能会出现数据倾斜。
+
+8)def sample(
+  withReplacement: Boolean,
+  fraction: Double,
+  seed: Long = Utils.random.nextLong): RDD[T]
+根据指定的规则从数据集中抽取数据
+
+9)def distinct()(implicit ord: Ordering[T] = null): RDD[T]
+def distinct(numPartitions: Int)(implicit ord: Ordering[T] = null): RDD[T]
+将数据集中重复的数据去重
+
+10)def coalesce(numPartitions: Int, shuffle: Boolean = false,
+           partitionCoalescer: Option[PartitionCoalescer] = Option.empty)
+          (implicit ord: Ordering[T] = null): RDD[T]
+根据数据量缩减分区，用于大数据集过滤后，提高小数据集的执行效率
+当spark程序中，存在过多的小任务的时候，可以通过coalesce方法，收缩合并分区，减少分区的个数，减小任务调度成本
+
+11)def repartition(numPartitions: Int)(implicit ord: Ordering[T] = null): RDD[T]
+该操作内部其实执行的是coalesce操作，参数shuffle的默认值为true。无论是将分区数多的RDD转换为分区数少的RDD，还是将分区数少的RDD转换为分区数多的RDD，repartition操作都可以完成，因为无论如何都会经shuffle过程。
+
+12) sortBy[K](f: (T) => K,ascending: Boolean = true, numPartitions: Int = this.partitions.length)
+  (implicit ord: Ordering[K], ctag: ClassTag[K]): RDD[T]
+该操作用于排序数据。在排序之前，可以将数据通过f函数进行处理，之后按照f函数处理的结果进行排序，默认为升序排列。排序后新产生的RDD的分区数与原RDD的分区数一致。中间存在shuffle的过程
+
+双Value类型
+
+13)def intersection(other: RDD[T]): RDD[T]
+对源RDD和参数RDD求交集后返回一个新的RDD
+14)uniondef union(other: RDD[T]): RDD[T]
+对源RDD和参数RDD求并集后返回一个新的RDD
+15)def subtract(other: RDD[T]): RDD[T]
+以一个RDD元素为主，去除两个RDD中重复元素，将其他元素保留下来。求差集
+
+16)def zip[U: ClassTag](other: RDD[U]): RDD[(T, U)]
+将两个RDD中的元素，以键值对的形式进行合并。其中，键值对中的Key为第1个RDD中的元素，Value为第2个RDD中的相同位置的元素。
+
+Key - Value类型
+17)def partitionBy(partitioner: Partitioner): RDD[(K, V)]
+将数据按照指定Partitioner重新进行分区。Spark默认的分区器是HashPartitioner
+
+18)
+def reduceByKey(func: (V, V) => V): RDD[(K, V)]
+def reduceByKey(func: (V, V) => V, numPartitions: Int): RDD[(K, V)]
+可以将数据按照相同的Key对Value进行聚合
+
+19）def groupByKey(): RDD[(K, Iterable[V])]
+def groupByKey(numPartitions: Int): RDD[(K, Iterable[V])]
+def groupByKey(partitioner: Partitioner): RDD[(K, Iterable[V])]
+将数据源的数据根据key对value进行分组
+
+从shuffle的角度：reduceByKey和groupByKey都存在shuffle的操作，但是reduceByKey可以在shuffle前对分区内相同key的数据进行预聚合（combine）功能，这样会减少落盘的数据量，而groupByKey只是进行分组，不存在数据量减少的问题，reduceByKey性能比较高。
+从功能的角度：reduceByKey其实包含分组和聚合的功能。groupByKey只能分组，不能聚合，所以在分组聚合的场合下，推荐使用reduceByKey，如果仅仅是分组而不需要聚合。那么还是只能使用groupByKey
+
+20)def aggregateByKey[U: ClassTag](zeroValue: U)(seqOp: (U, V) => U, combOp: (U, U) => U): RDD[(K, U)]
+将数据根据不同的规则进行分区内计算和分区间计算
+
+21)def foldByKey(zeroValue: V)(func: (V, V) => V): RDD[(K, V)]
+当分区内计算规则和分区间计算规则相同时，aggregateByKey就可以简化为foldByKey
+
+22)def combineByKey[C](
+  createCombiner: V => C,
+  mergeValue: (C, V) => C,
+  mergeCombiners: (C, C) => C): RDD[(K, C)]
+
+最通用的对key-value型rdd进行聚集操作的聚集函数（aggregation function）。类似于aggregate()，combineByKey()允许用户返回值的类型与输入不一致。
+
+reduceByKey: 相同key的第一个数据不进行任何计算，分区内和分区间计算规则相同
+foldByKey: 相同key的第一个数据和初始值进行分区内计算，分区内和分区间计算规则相同
+aggregateByKey：相同key的第一个数据和初始值进行分区内计算，分区内和分区间计算规则可以不相同
+combineByKey:当计算时，发现数据结构不满足要求时，可以让第一个数据转换结构。分区内和分区间计算规则不相同。
+
+
+23)def sortByKey(ascending: Boolean = true, numPartitions: Int = self.partitions.length) : RDD[(K, V)]
+在一个(K,V)的RDD上调用，K必须实现Ordered接口(特质)，返回一个按照key进行排序的
+
+24)def join[W](other: RDD[(K, W)]): RDD[(K, (V, W))]
+在类型为(K,V)和(K,W)的RDD上调用，返回一个相同key对应的所有元素连接在一起的(K,(V,W))的RDD
+
+25)def leftOuterJoin[W](other: RDD[(K, W)]): RDD[(K, (V, Option[W]))]
+类似于SQL语句的左外连接
+
+26)def cogroup[W](other: RDD[(K, W)]): RDD[(K, (Iterable[V], Iterable[W]))]
+在类型为(K,V)和(K,W)的RDD上调用，返回一个(K,(Iterable<V>,Iterable<W>))类型的RDD
+
+WordCount 先统计减少数据量之后再分组！！！
