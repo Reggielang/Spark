@@ -1,0 +1,109 @@
+行动算子 
+行动算子被调用时，会触发spark作业的执行，会构建新的作业
+
+1)reduce
+def reduce(f: (T, T) => T): T
+聚集RDD中的所有元素，先聚合分区内数据，再聚合分区间数据
+
+2)collect
+def collect(): Array[T]
+在驱动程序（Driver）中，以数组Array的形式返回数据集的所有元素
+
+3)count
+def count(): Long
+返回RDD中元素的个数
+
+4)first
+def first(): T
+返回RDD中的第一个元素
+
+5)take
+def take(num: Int): Array[T]
+返回一个由RDD的前n个元素组成的数组
+
+6)takeOrdered
+def takeOrdered(num: Int)(implicit ord: Ordering[T]): Array[T]
+返回该RDD排序后的前n个元素组成的数组
+
+7)aggregate
+def aggregate[U: ClassTag](zeroValue: U)(seqOp: (U, T) => U, combOp: (U, U) => U): U
+分区的数据通过初始值和分区内的数据进行聚合，然后再和初始值进行分区间的数据聚合
+
+8)fold
+def fold(zeroValue: T)(op: (T, T) => T): T
+折叠操作，aggregate的简化版操作
+
+9)countByKey
+def countByKey(): Map[K, Long]
+统计每种key的个数
+
+10)save相关算子
+def saveAsTextFile(path: String): Unit
+def saveAsObjectFile(path: String): Unit
+def saveAsSequenceFile(
+  path: String,
+  codec: Option[Class[_ <: CompressionCodec]] = None): Unit
+将数据保存到不同格式的文件中
+
+11)foreach
+def foreach(f: T => Unit): Unit = withScope {
+    val cleanF = sc.clean(f)
+    sc.runJob(this, (iter: Iterator[T]) => iter.foreach(cleanF))}
+分布式遍历RDD中的每一个元素，调用指定函数
+
+
+Scala语法：闭包
+spark在执行算子时，如果的算子的内部使用了外部的变量（对象），那么意味着一定会出现闭包
+在这种场景中，需要将driver端，通过网络传入给executor端，这个操作不用执行也能判断出来
+可以在真正执行之前，对数据进行序列化校验
+spark在执行作业前，需要先进行闭包检测功能！
+
+1)闭包检查
+从计算的角度, 算子以外的代码都是在Driver端执行, 算子里面的代码都是在Executor端执行。那么在scala的函数式编程中，就会导致算子内经常会用到算子外的数据，这样就形成了闭包的效果，如果使用的算子外的数据无法序列化，就意味着无法传值给Executor端执行，就会发生错误，所以需要在执行任务计算前，检测闭包内的对象是否可以进行序列化，这个操作我们称之为闭包检测。
+
+2)序列化方法和属性
+从计算的角度, 算子以外的代码都是在Driver端执行, 算子里面的代码都是在Executor端执行
+
+3)Kryo序列化框架
+Java的序列化能够序列化任何的类。但是比较重（字节多），序列化后，对象的提交也比较大。Spark出于性能的考虑，Spark2.0开始支持另外一种Kryo序列化机制。Kryo速度是Serializable的10倍。当RDD在Shuffle数据的时候，简单数据类型、数组和字符串类型已经在Spark内部使用Kryo来序列化。
+注意：即使使用Kryo序列化，也要继承Serializable接口。
+
+
+RDD依赖关系
+1)RDD 血缘关系
+RDD只支持粗粒度转换，即在大量记录上执行的单个操作。将创建RDD的一系列Lineage（血统）记录下来，以便恢复丢失的分区。RDD的Lineage会记录RDD的元数据信息和转换行为，当该RDD的部分分区数据丢失时，它可以根据这些信息来重新运算和恢复丢失的数据分区。
+
+2)RDD 依赖关系
+这里所谓的依赖关系，其实就是两个相邻RDD之间的关系
+
+3)RDD 窄依赖
+窄依赖表示每一个父(上游)RDD的Partition最多被子（下游）RDD的一个Partition使用，窄依赖叫独生子女。
+
+4)RDD 宽依赖
+宽依赖表示同一个父（上游）RDD的Partition被多个子（下游）RDD的Partition依赖，会引起Shuffle
+总结：宽依赖叫多生。
+
+7)RDD 任务划分
+RDD任务切分中间分为：Application、Job、Stage和Task
+Application：初始化一个SparkContext即生成一个Application；
+Job：一个Action算子就会生成一个Job；
+Stage：Stage等于宽依赖(ShuffleDependency)的个数加1；
+Task：一个Stage阶段中，最后一个RDD的分区个数就是Task的个数。
+注意：Application->Job->Stage->Task每一层都是1对n的关系。 
+
+RDD持久化
+1)RDD Cache缓存
+RDD通过Cache或者Persist方法将前面的计算结果缓存，默认情况下会把数据以缓存在JVM的堆内存中。但是并不是这两个方法被调用时立即缓存，而是触发后面的action算子时，该RDD将会被缓存在计算节点的内存中，并供后面重用。
+
+缓存有可能丢失，或者存储于内存的数据由于内存不足而被删除，RDD的缓存容错机制保证了即使缓存丢失也能保证计算的正确执行。通过基于RDD的一系列转换，丢失的数据会被重算，由于RDD的各个Partition是相对独立的，因此只需要计算丢失的部分即可，并不需要重算全部Partition。
+Spark会自动对一些Shuffle操作的中间数据做持久化操作(比如：reduceByKey)。这样做的目的是为了当一个节点Shuffle失败了避免重新计算整个输入。但是，在实际使用的时候，如果想重用数据，仍然建议调用persist或cache。
+
+2)RDD CheckPoint检查点
+所谓的检查点其实就是通过将RDD中间结果写入磁盘
+由于血缘依赖过长会造成容错成本过高，这样就不如在中间阶段做检查点容错，如果检查点之后有节点出现问题，可以从检查点开始重做血缘，减少了开销。
+对RDD进行checkpoint操作并不会马上被执行，必须执行Action操作才能触发。
+
+3)缓存和检查点区别
+1）Cache缓存只是将数据保存起来，不切断血缘依赖。Checkpoint检查点切断血缘依赖。
+2）Cache缓存的数据通常存储在磁盘、内存等地方，可靠性低。Checkpoint的数据通常存储在HDFS等容错、高可用的文件系统，可靠性高。
+3）建议对checkpoint()的RDD使用Cache缓存，这样checkpoint的job只需从Cache缓存中读取数据即可，否则需要再从头计算一次RDD。
