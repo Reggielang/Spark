@@ -107,3 +107,23 @@ Spark会自动对一些Shuffle操作的中间数据做持久化操作(比如：r
 1）Cache缓存只是将数据保存起来，不切断血缘依赖。Checkpoint检查点切断血缘依赖。
 2）Cache缓存的数据通常存储在磁盘、内存等地方，可靠性低。Checkpoint的数据通常存储在HDFS等容错、高可用的文件系统，可靠性高。
 3）建议对checkpoint()的RDD使用Cache缓存，这样checkpoint的job只需从Cache缓存中读取数据即可，否则需要再从头计算一次RDD。
+
+
+RDD分区器
+Spark目前支持Hash分区和Range分区，和用户自定义分区。Hash分区为当前的默认分区。分区器直接决定了RDD中分区的个数、RDD中每条数据经过Shuffle后进入哪个分区，进而决定了Reduce的个数。
+只有Key-Value类型的RDD才有分区器，非Key-Value类型的RDD分区的值是None
+每个RDD的分区ID范围：0 ~ (numPartitions - 1)，决定这个值是属于那个分区的。
+1)Hash分区：对于给定的key，计算其hashCode,并除以分区个数取余
+2)Range分区：将一定范围内的数据映射到一个分区中，尽量保证每个分区数据均匀，而且分区间有序
+
+RDD文件读取与保存
+Spark的数据读取及数据保存可以从两个维度来作区分：文件格式以及文件系统。
+文件格式分为：text文件、csv文件、sequence文件以及Object文件；
+文件系统分为：本地文件系统、HDFS、HBASE以及数据库。
+
+累加器
+累加器用来把Executor端变量信息聚合到Driver端。在Driver程序中定义的变量，在Executor端的每个Task都会得到这个变量的一份新的副本，每个task更新这些副本的值后，传回Driver端进行merge。
+
+广播变量
+广播变量用来高效分发较大的对象。向所有工作节点发送一个较大的只读值，以供一个或多个Spark操作使用。比如，如果你的应用需要向所有节点发送一个较大的只读查询表，广播变量用起来都很顺手。在多个并行操作中使用同一个变量，但是 Spark会为每个任务分别发送。
+
