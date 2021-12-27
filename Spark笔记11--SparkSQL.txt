@@ -1,0 +1,79 @@
+Spark SQL是Spark用于结构化数据(structured data)处理的Spark模块。
+
+SparkSQL的前身是Shark，给熟悉RDBMS但又不理解MapReduce的技术人员提供快速上手的工具。
+Hive是早期唯一运行在Hadoop上的SQL-on-Hadoop工具。但是MapReduce计算过程中大量的中间磁盘落地过程消耗了大量的I/O，降低的运行效率
+
+SparkSQL特点：
+1、易整合
+无缝的整合了 SQL 查询和 Spark 编程
+
+2、 统一的数据访问
+使用相同的方式连接不同的数据源
+
+3、兼容Hive
+在已有的仓库上直接运行 SQL 或者 HiveQL
+
+4、标准数据连接
+通过 JDBC 或者 ODBC 来连接
+
+
+DataFrame
+在Spark中，DataFrame是一种以RDD为基础的分布式数据集，类似于传统数据库中的二维表格。
+
+DataSet
+DataSet是分布式数据集合。DataSet是Spark 1.6中添加的一个新抽象，是DataFrame的一个扩展。它提供了RDD的优势（强类型，使用强大的lambda函数的能力）以及Spark SQL优化执行引擎的优点。DataSet也可以使用功能性的转换（操作map，flatMap，filter等等）。
+
+
+SQL语法
+SQL语法风格是指我们查询数据的时候使用SQL语句来查询，这种风格的查询必须要有临时视图或者全局视图来辅助
+1)读取JSON文件创建DataFrame
+scala> val df = spark.read.json("data/user.json")
+df: org.apache.spark.sql.DataFrame = [age: bigint， username: string]
+2)对DataFrame创建一个临时表(视图)
+scala> df.createOrReplaceTempView("people")
+3)通过SQL语句实现查询全表
+scala> val sqlDF = spark.sql("SELECT * FROM people")
+
+注意:涉及到运算的时候, 每列都必须使用$, 或者采用引号表达式：单引号+字段名
+scala> df.select($"username",$"age" + 1).show
+scala> df.select('username, 'age + 1).show()
+
+在IDEA中开发程序时，如果需要RDD与DF或者DS之间互相操作，那么需要引入 import spark.implicits._
+这里的spark不是Scala中的包名，而是创建的sparkSession对象的变量名称，所以必须先创建SparkSession对象再导入。这里的spark对象不能使用var声明，因为Scala只支持val修饰的对象的引入。
+
+scala>  val idRDD = sc.textFile("data/id.txt")
+scala> idRDD.toDF("id").show
+
+
+DataSet是具有强类型的数据集合，需要提供对应的类型信息。
+
+创建DataSet
+1）使用样例类序列创建DataSet
+scala> case class Person(name: String, age: Long)
+
+scala> val caseClassDS = Seq(Person("zhangsan",2)).toDS()
+
+scala> caseClassDS.show
+
+
+DataFrame其实是DataSet的特例，所以它们之间是可以互相转换的。
+DataFrame转换为DataSet
+scala> case class User(name:String, age:Int)
+scala> val df = sc.makeRDD(List(("zhangsan",30), ("lisi",49))).toDF("name","age")
+scala> val ds = df.as[User]
+
+三者的区别
+1)RDD
+RDD一般和spark mllib同时使用
+RDD不支持sparksql操作
+
+2)DataFrame
+与RDD和Dataset不同，DataFrame每一行的类型固定为Row，每一列的值没法直接访问，只有通过解析才能获取各个字段的值
+DataFrame与DataSet一般不与 spark mllib 同时使用
+DataFrame与DataSet均支持 SparkSQL 的操作，比如select，groupby之类，还能注册临时表/视窗，进行 sql 语句操作
+DataFrame与DataSet支持一些特别方便的保存方式，比如保存成csv，可以带上表头，这样每一列的字段名一目了然(后面专门讲解)
+
+3)DataSet
+Dataset和DataFrame拥有完全相同的成员函数，区别只是每一行的数据类型不同。 DataFrame其实就是DataSet的一个特例  
+type DataFrame = Dataset[Row]
+DataFrame也可以叫Dataset[Row],每一行的类型是Row，不解析，每一行究竟有哪些字段，各个字段又是什么类型都无从得知，只能用上面提到的getAS方法或者共性中的第七条提到的模式匹配拿出特定字段。而Dataset中，每一行是什么类型是不一定的，在自定义了case class之后可以很自由的获得每一行的信息
